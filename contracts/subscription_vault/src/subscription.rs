@@ -1715,6 +1715,42 @@ pub fn do_resume_subscription(
     Ok(())
 }
 
+/// Resume a subscription paused while its subscriber was blocklisted.
+///
+/// Blocklist removal is an administrative recovery operation, so it cannot
+/// call [`do_resume_subscription`] (which intentionally requires the
+/// subscriber or merchant).  Keep the transition in this module so the
+/// active-subscription index and lifecycle event remain consistent.
+pub(crate) fn resume_after_blocklist_removal(
+    env: &Env,
+    subscription_id: u32,
+    authorizer: Address,
+) -> Result<(), Error> {
+    let mut sub = get_subscription(env, subscription_id)?;
+    if sub.status != SubscriptionStatus::Paused {
+        return Ok(());
+    }
+
+    let previous_status = sub.status;
+    transition_to(&mut sub.status, SubscriptionStatus::Active)?;
+    write_subscription(env, subscription_id, &sub);
+    increment_subscriber_active_count(env, &sub.subscriber);
+
+    env.events().publish(
+        (Symbol::new(env, "sub_resumed"), subscription_id),
+        crate::types::SubscriptionResumedEvent {
+            subscription_id,
+            subscriber: sub.subscriber,
+            merchant: sub.merchant,
+            authorizer,
+            previous_status,
+            timestamp: env.ledger().timestamp(),
+            schema_version: crate::types::EVENT_SCHEMA_VERSION,
+        },
+    );
+    Ok(())
+}
+
 // ── Bulk admin/operator pause & cancel ──────────────────────────────────────
 //
 // Operational-hygiene tooling for offboarding or containing a compromised
