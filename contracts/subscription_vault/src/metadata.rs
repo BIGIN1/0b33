@@ -249,6 +249,16 @@ pub fn build_metadata_signed_message(
 ///
 /// Ensures key and value length constraints, UTF-8 validity, and that adding
 /// a new key will not exceed [`MAX_METADATA_KEYS`].
+///
+/// # Insert vs. update (Issue #476)
+///
+/// The key-count limit (`MAX_METADATA_KEYS`) is only enforced for **new**
+/// keys. Updating an existing key — one already present in
+/// `DataKey::MetadataKeys(subscription_id)` — does **not** consume a new
+/// slot and must always succeed (provided the value passes length/UTF-8
+/// validation). This is checked by testing `key_exists` before comparing
+/// `keys.len() >= MAX_METADATA_KEYS`: if the key already exists the limit
+/// is skipped entirely.
 pub fn validate_metadata_input(
     env: &Env,
     subscription_id: u32,
@@ -288,12 +298,7 @@ pub fn validate_metadata_input(
 ///
 /// Assumes [`validate_metadata_input`] has already validated lengths, UTF-8,
 /// and key quota.
-pub fn apply_metadata_storage(
-    env: &Env,
-    subscription_id: u32,
-    key: &String,
-    value: &String,
-) {
+pub fn apply_metadata_storage(env: &Env, subscription_id: u32, key: &String, value: &String) {
     let mut keys: Vec<String> = env
         .storage()
         .persistent()
@@ -423,7 +428,7 @@ pub fn list_metadata_keys(env: &Env, subscription_id: u32) -> Result<Vec<String>
 }
 
 /// Validates that a soroban_sdk::String contains valid UTF-8 byte sequences.
-/// 
+///
 /// While soroban_sdk::String should theoretically contain valid UTF-8, this explicit
 /// validation prevents malformed byte sequences from corrupting off-chain indexers
 /// that parse event payloads as UTF-8.
@@ -639,8 +644,8 @@ mod signed_message_tests {
 #[cfg(test)]
 mod metadata_limit_ordering_tests {
     use super::*;
-    use soroban_sdk::{Env, String, Vec};
     use crate::types::DataKey;
+    use soroban_sdk::{Env, String, Vec};
 
     #[test]
     fn metadata_key_limit_checked_before_storage_mutation() {
