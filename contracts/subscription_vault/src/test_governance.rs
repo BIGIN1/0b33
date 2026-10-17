@@ -96,3 +96,39 @@ fn direct_admin_rotation_invalidates_outstanding_proposals() {
 		Err(Ok(Error::ProposalInvalidated))
 	);
 }
+
+#[test]
+fn governance_can_enable_merchant_usage_charge_cap_override() {
+	let env = Env::default();
+	env.mock_all_auths();
+	let contract_id = env.register(SubscriptionVault, ());
+	let client = SubscriptionVaultClient::new(&env, &contract_id);
+	let admin = Address::generate(&env);
+	let token = env
+		.register_stellar_asset_contract_v2(admin.clone())
+		.address();
+	client.init(&token, &6, &admin, &1_000_000i128, &(7 * 24 * 60 * 60));
+
+	let merchant = Address::generate(&env);
+	client.add_guardian(&admin, &admin, &1u32);
+	let eta = env.ledger().timestamp() + 3 * 24 * 60 * 60;
+	let proposal_id = client.submit_proposal(
+		&ProposalKind::SetUsageChargeCapOverride,
+		&merchant,
+		&None::<Address>,
+		&1u32,
+		&5_000u32,
+		&eta,
+	);
+	client.vote_proposal(&proposal_id, &true, &0u64);
+	env.ledger().set_timestamp(eta);
+	client.execute_proposal(&proposal_id);
+
+	let enabled = env.as_contract(&contract_id, || {
+		env.storage()
+			.instance()
+			.get::<_, bool>(&crate::types::DataKey::UsageChargeCapOverride(merchant))
+			.unwrap_or(false)
+	});
+	assert!(enabled);
+}

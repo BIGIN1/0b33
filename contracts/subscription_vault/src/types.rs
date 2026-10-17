@@ -349,6 +349,8 @@ pub enum DataKey {
     MerchantSubAccount(Address, Symbol),
     /// Registered sub-account labels for a merchant (instance). Discriminant 81.
     MerchantSubAccountList(Address),
+    /// Governance-approved exception to the subscription-amount usage charge cap (instance).
+    UsageChargeCapOverride(Address),
 }
 
 impl DataKey {
@@ -443,6 +445,7 @@ impl DataKey {
             DataKey::EmergencyWithdrawIntent(_) => 81,
             DataKey::MerchantSubAccount(_, _) => 82,
             DataKey::MerchantSubAccountList(_) => 83,
+            DataKey::UsageChargeCapOverride(_) => 84,
         }
     }
 
@@ -518,6 +521,7 @@ pub const KNOWN_INSTANCE_KEY_DISCRIMINANTS: &[u32] = &[
     79, // OraclePriceHistoryEntry(Address, u32)
     82, // MerchantSubAccount(Address, Symbol)
     83, // MerchantSubAccountList(Address)
+    84, // UsageChargeCapOverride(Address)
 ];
 
 /// Returns `true` if `discriminant` is a recognised instance-storage key.
@@ -1126,6 +1130,8 @@ pub enum ProposalKind {
     AddAcceptedToken = 5,
     /// Remove accepted token `Proposal::target`.
     RemoveAcceptedToken = 6,
+    /// Set the merchant's usage charge cap override (`target3`: 0 = disabled, 1 = enabled).
+    SetUsageChargeCapOverride = 7,
 }
 
 
@@ -1398,6 +1404,8 @@ pub enum Error {
     DisputeOverpay = 10007,
     /// Blocklist removal is rejected because the subscriber has open disputes.
     SubscriberHasOpenDisputes = 10008,
+    /// The disputed amount exceeds the merchant's available balance.
+    DisputeAmountExceedsMerchantBalance = 10009,
 
     // --- Subscription Transfer (11000-11099) ---
     /// The transfer intent was not found or has expired.
@@ -2878,6 +2886,20 @@ pub struct UsageLimitsConfiguredEvent {
     pub rate_window_secs: u64,
     pub burst_min_interval_secs: u64,
     pub usage_cap_units: Option<i128>,
+    pub timestamp: u64,
+    pub schema_version: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct UsageCapResetEvent {
+    pub subscription_id: u32,
+    pub merchant: Address,
+    pub token: Address,
+    pub previous_period_index: u64,
+    pub current_period_index: u64,
+    pub previous_period_usage_units: i128,
+    pub usage_cap_units: i128,
     pub timestamp: u64,
     pub schema_version: u32,
 }

@@ -321,6 +321,7 @@ pub fn do_execute_proposal(env: &Env, proposal_id: u64) -> Result<(), Error> {
         // - RecoverStrandedFunds: Transfers funds, doesn't touch init keys
         // - AddAcceptedToken: Adds to token list, doesn't touch DataKey::Token
         // - RemoveAcceptedToken: Removes from token list, doesn't touch DataKey::Token
+        // - SetUsageChargeCapOverride: Updates only a merchant usage-charge setting
         //
         // FUTURE: If adding ProposalKind::UpdateConfig or similar that writes to
         // DataKey::Token, DataKey::MinTopup, or DataKey::GracePeriod, add it here:
@@ -361,6 +362,16 @@ pub fn do_execute_proposal(env: &Env, proposal_id: u64) -> Result<(), Error> {
         }
         ProposalKind::RemoveAcceptedToken => {
             // Token removal is handled by the caller
+        }
+        ProposalKind::SetUsageChargeCapOverride => {
+            if proposal.target3 > 1 {
+                return Err(Error::InvalidInput);
+            }
+            crate::admin::write_config(
+                env,
+                &DataKey::UsageChargeCapOverride(proposal.target.clone()),
+                &(proposal.target3 == 1),
+            );
         }
     }
 

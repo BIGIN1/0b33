@@ -3791,6 +3791,35 @@ fn test_charge_usage_basic() {
 }
 
 #[test]
+fn test_charge_usage_exceeding_subscription_amount_is_rejected() {
+    let test_env = TestEnv::default();
+    test_env.env.ledger().with_mut(|li| li.timestamp = T0);
+
+    let subscriber = Address::generate(&test_env.env);
+    let merchant = Address::generate(&test_env.env);
+    let id = test_env.client.create_subscription(
+        &subscriber,
+        &merchant,
+        &AMOUNT,
+        &INTERVAL,
+        &true,
+        &None::<i128>,
+        &None::<u64>,
+        &None::<u32>,
+    );
+    fixtures::seed_balance(&test_env.env, &test_env.client, id, PREPAID);
+
+    let result = test_env.client.charge_usage_with_reference(
+        &id,
+        &(AMOUNT + 1),
+        &soroban_sdk::String::from_str(&test_env.env, "over-cap"),
+    );
+
+    assert_eq!(result, crate::UsageChargeResult::UsageCapExceeded);
+    assertions::assert_prepaid_balance(&test_env.client, &id, PREPAID);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #6003)")]
 fn test_charge_usage_not_enabled() {
     let test_env = TestEnv::default();
@@ -10447,6 +10476,21 @@ fn test_usage_cap_resets_on_period_rollover() {
     env.ledger().with_mut(|li| li.timestamp = T0 + INTERVAL);
     let r3 = client.charge_usage_with_reference(&id, &1_000_000, &String::from_str(&env, "p2c1"));
     assert_eq!(r3, crate::UsageChargeResult::Charged);
+
+    let mut reset_event: Option<crate::UsageCapResetEvent> = None;
+    for event in env.events().all().iter() {
+        let topics = event.1;
+        let topic = Symbol::from_val(&env, &topics.get(0).unwrap());
+        if topic == Symbol::new(&env, "usage_cap_reset") {
+            reset_event = Some(crate::UsageCapResetEvent::from_val(&env, &event.2));
+        }
+    }
+    let reset_event = reset_event.expect("expected usage_cap_reset event on period rollover");
+    assert_eq!(reset_event.subscription_id, id);
+    assert_eq!(reset_event.previous_period_index, 0);
+    assert_eq!(reset_event.current_period_index, 1);
+    assert_eq!(reset_event.previous_period_usage_units, 1_000_000);
+    assert_eq!(reset_event.usage_cap_units, 1_000_000);
 }
 
 #[test]
