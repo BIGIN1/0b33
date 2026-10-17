@@ -216,6 +216,26 @@ Emitted when usage-based charges are processed via `charge_usage()`.
 
 ---
 
+### UsageCapResetEvent
+
+**Topic:** `("usage_cap_reset", subscription_id)`
+
+Emitted when a usage-enabled subscription with a configured per-period usage cap enters a later billing period and its accumulated usage is reset.
+
+**Fields:**
+
+- `subscription_id`: u32
+- `merchant`: Address
+- `token`: Address — settlement token
+- `previous_period_index`: u64
+- `current_period_index`: u64
+- `previous_period_usage_units`: i128 — usage accumulated before the reset
+- `usage_cap_units`: i128 — configured per-period cap
+- `timestamp`: u64
+- `schema_version`: u32
+
+---
+
 ## Subscription Status Events
 
 ### SubscriptionPausedEvent

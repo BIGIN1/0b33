@@ -68,7 +68,7 @@ pub fn do_open_dispute(
     let token_addr = &sub.token;
     let merchant_balance = merchant::get_merchant_balance_by_token(env, &sub.merchant, token_addr);
     if merchant_balance < amount {
-        return Err(Error::InsufficientBalance);
+        return Err(Error::DisputeAmountExceedsMerchantBalance);
     }
 
     // ΓöÇΓöÇ Effects (state mutations before external interactions) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
