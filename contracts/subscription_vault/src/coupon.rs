@@ -45,7 +45,7 @@
 
 use crate::types::{
     Coupon, CouponAppliedEvent, CouponCreatedEvent, CouponRevokedEvent, DataKey,
-    DiscountAppliedEvent, Error, SUB_TTL_EXTEND_TO, SUB_TTL_THRESHOLD, EVENT_SCHEMA_VERSION,
+    DiscountAppliedEvent, Error, EVENT_SCHEMA_VERSION, SUB_TTL_EXTEND_TO, SUB_TTL_THRESHOLD,
 };
 use soroban_sdk::{Address, Env, Symbol};
 
@@ -249,12 +249,7 @@ pub fn apply_coupon(
     // Bind coupon to subscription.
     let sub_key = DataKey::SubCoupon(subscription_id);
     env.storage().persistent().set(&sub_key, &code);
-    crate::subscription::maybe_extend_ttl(
-        env,
-        &sub_key,
-        SUB_TTL_THRESHOLD,
-        SUB_TTL_EXTEND_TO,
-    );
+    crate::subscription::maybe_extend_ttl(env, &sub_key, SUB_TTL_THRESHOLD, SUB_TTL_EXTEND_TO);
 
     // Mark this (subscription_id, code) pair as redeemed.
     mark_coupon_redeemed(env, subscription_id, &code);
@@ -321,9 +316,20 @@ pub fn validate_coupon_for_charge(
 /// Returns the discount (non-negative). The caller subtracts this from gross.
 ///
 /// # Discount ordering
-/// 1. Percentage discount applied first.
+///
+/// 1. Percentage discount applied first (reduces gross by `percent_off_bps`).
 /// 2. Fixed discount applied to the result of step 1.
 /// 3. Payable amount is clamped to `[0, gross]`.
+///
+/// # Coupon vs. fee ordering (Issue #475)
+///
+/// The discount returned here is computed on the **gross** charge amount,
+/// *before* the protocol fee is deducted. The caller (`charge_one`) applies
+/// the discount first, then computes the fee on the resulting payable amount.
+/// This ensures the merchant — not the treasury — absorbs the coupon
+/// discount, and the invariant `Gross = Discount + Merchant Net + Treasury
+/// Fee` holds. See the comment block at the call site in `charge_core.rs`
+/// for a worked example.
 pub fn compute_discount(gross: i128, coupon: &Coupon) -> i128 {
     // Step 1 — percentage
     let after_pct = if coupon.percent_off_bps > 0 {
@@ -394,5 +400,126 @@ pub fn apply_discount_at_charge(
 
             (payable, discount)
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: coupon discount vs. fee ordering (Issue #475)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod coupon_fee_ordering_tests {
+    use super::*;
+    use soroban_sdk::{Address, Env, Symbol};
+
+    /// The discount must be computed on the **gross** amount, not the
+    /// post-fee amount. This test asserts that the discount + fee + merchant
+    /// net sums to the gross exactly when the discount is applied first.
+    #[test]
+    fn discount_on_gross_preserves_fund_conservation() {
+        let gross = 10_000i128;
+        let percent_off_bps = 2_000u32; // 20 %
+        let fixed_off = 0i128;
+        let fee_bps = 500u32; // 5 %
+
+        let coupon = Coupon {
+            code: Symbol::new(&Env::default(), "TEST"),
+            merchant: Address::generate(&Env::default()),
+            token: Address::generate(&Env::default()),
+            percent_off_bps,
+            fixed_off,
+            max_redemptions: 0,
+            expires_at: 0,
+            revoked: false,
+        };
+
+        // Step 1 — discount on gross
+        let discount = compute_discount(gross, &coupon);
+        let payable = gross - discount;
+
+        // Step 2 — fee on payable (post-discount)
+        let fee = payable * fee_bps as i128 / 10_000i128;
+        let merchant_net = payable - fee;
+
+        // Invariant: Gross = Discount + Merchant Net + Treasury Fee
+        assert_eq!(
+            discount + merchant_net + fee,
+            gross,
+            "fund conservation must hold when discount is applied to gross"
+        );
+
+        // Specific values: gross=10_000, 20% off → payable=8_000,
+        // 5% fee on 8_000 → fee=400, merchant_net=7_600, discount=2_000
+        assert_eq!(payable, 8_000);
+        assert_eq!(discount, 2_000);
+        assert_eq!(fee, 400);
+        assert_eq!(merchant_net, 7_600);
+    }
+
+    /// If the discount were (incorrectly) applied *after* the fee, the merchant
+    /// would absorb part of the discount. This test demonstrates the
+    /// *incorrect* ordering produces different merchant payouts for non-round
+    /// values, confirming the current (correct) ordering matters.
+    #[test]
+    fn discount_on_gross_differs_from_discount_on_post_fee() {
+        // Choose values where the two orderings diverge:
+        //   gross = 9_999, coupon = 33 %, fee = 7 %
+        let gross = 9_999i128;
+        let percent_off_bps = 3_300u32; // 33 %
+        let fee_bps = 700u32; // 7 %
+
+        let coupon = Coupon {
+            code: Symbol::new(&Env::default(), "DIV"),
+            merchant: Address::generate(&Env::default()),
+            token: Address::generate(&Env::default()),
+            percent_off_bps,
+            fixed_off: 0,
+            max_redemptions: 0,
+            expires_at: 0,
+            revoked: false,
+        };
+
+        // Correct ordering: discount on gross, then fee on payable
+        let discount_correct = compute_discount(gross, &coupon);
+        let payable_correct = gross - discount_correct;
+        let fee_correct = payable_correct * fee_bps as i128 / 10_000i128;
+        let merchant_net_correct = payable_correct - fee_correct;
+
+        // Incorrect ordering: fee on gross, then discount on post-fee
+        let fee_wrong = gross * fee_bps as i128 / 10_000i128;
+        let post_fee = gross - fee_wrong;
+        let discount_wrong = post_fee * percent_off_bps as i128 / 10_000i128;
+        let merchant_net_wrong = post_fee - discount_wrong;
+
+        // The two orderings produce different merchant payouts.
+        assert_ne!(
+            merchant_net_correct, merchant_net_wrong,
+            "correct and incorrect orderings must diverge for non-round values"
+        );
+
+        // The correct ordering preserves: Gross = Discount + Merchant Net + Fee
+        assert_eq!(discount_correct + merchant_net_correct + fee_correct, gross);
+    }
+
+    /// Verify the full `apply_discount_at_charge` path returns a payable that,
+    /// when the fee is applied, preserves the fund conservation invariant.
+    #[test]
+    fn apply_discount_then_fee_preserves_invariant() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let gross = 5_000i128;
+        let fee_bps = 300u32; // 3 %
+
+        // No coupon bound → payable = gross, discount = 0
+        let (payable, discount) =
+            apply_discount_at_charge(&env, 999, 0, &Address::generate(&env), gross);
+        assert_eq!(payable, gross);
+        assert_eq!(discount, 0);
+
+        // With no discount, fee = gross * fee_bps / 10_000
+        let fee = payable * fee_bps as i128 / 10_000i128;
+        let merchant_net = payable - fee;
+        assert_eq!(discount + merchant_net + fee, gross);
     }
 }

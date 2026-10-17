@@ -40,9 +40,9 @@ use crate::types::{
     BillingChargeKind, BillingPeriodSnapshot, ChargeExecutionResult, ChargeFailureEvent, DataKey,
     Error, FeeConvertedEvent, GracePeriodEnteredEvent, LifetimeCapReachedEvent,
     SubscriptionAutoPausedEvent, SubscriptionCancelledEvent, SubscriptionChargeFailedEvent,
-    SubscriptionChargedEvent, SubscriptionStatus, TOPIC_CHARGED, UsageChargeRejectedEvent, UsageChargeResult,
+    SubscriptionChargedEvent, SubscriptionStatus, UsageChargeRejectedEvent, UsageChargeResult,
     UsageLimits, UsageState, UsageStatementEvent, SNAPSHOT_FLAG_CLOSED,
-    SNAPSHOT_FLAG_INTERVAL_CHARGED, SNAPSHOT_FLAG_USAGE_CHARGED,
+    SNAPSHOT_FLAG_INTERVAL_CHARGED, SNAPSHOT_FLAG_USAGE_CHARGED, TOPIC_CHARGED,
 };
 use soroban_sdk::{Address, Env, String, Symbol};
 
@@ -317,10 +317,35 @@ pub fn charge_one(
     let charge_amount = crate::oracle::resolve_charge_amount(env, subscription_id, &sub)
         .map_err(|e| charge_fail(env, subscription_id, e, 0, now))?;
 
-    // ── Coupon discount (before protocol-fee split) ───────────────────────────
-    // Discount is applied to the oracle-resolved gross amount. The fee split and
-    // merchant credit then operate on `charge_amount` (the post-discount payable).
-    // This preserves: Gross = Discount + Merchant Net + Treasury Fee.
+    // ── Coupon discount (applied to gross, before protocol-fee split) ──────────
+    //
+    // Intended semantics (Issue #475):
+    //
+    // The coupon discount is applied to the **gross** charge amount — the
+    // oracle-resolved amount *before* the protocol fee is deducted. The fee
+    // split and merchant credit then operate on the **post-discount payable**
+    // (`charge_amount`). This ordering is deliberate:
+    //
+    //   gross = 10_000, coupon = 20 %, fee = 5 %
+    //
+    //   Step 1 — discount on gross:   payable = 10_000 * 8_000 / 10_000 = 8_000
+    //   Step 2 — fee on payable:      fee = 8_000 * 500 / 10_000 = 400
+    //                                merchant_net = 8_000 - 400 = 7_600
+    //
+    // If the discount were applied *after* the fee, the merchant would absorb
+    // part of the discount (fee would be computed on 10_000, then the coupon
+    // would reduce the merchant's net share), yielding a different payout:
+    //
+    //   fee = 10_000 * 500 / 10_000 = 500
+    //   merchant_net = (10_000 - 500) * 8_000 / 10_000 = 7_600  (same only by
+    //   coincidence for these numbers; diverges for non-round values)
+    //
+    // The invariant preserved is:
+    //
+    //   Gross = Discount + Merchant Net + Treasury Fee
+    //
+    // See also `coupon::compute_discount` for the percentage-then-fixed
+    // ordering within the discount itself.
     let (mut charge_amount, _discount_amount) = crate::coupon::apply_discount_at_charge(
         env,
         subscription_id,
@@ -334,8 +359,9 @@ pub fn charge_one(
     // scale the charge by the elapsed time within the first interval.
     if sub.proration_enabled && sub.last_payment_timestamp == sub.start_time {
         let elapsed_seconds = now.saturating_sub(sub.start_time);
-        charge_amount = calculate_prorated_first_charge(charge_amount, sub.interval_seconds, elapsed_seconds)
-            .map_err(|e| charge_fail(env, subscription_id, e, charge_amount, now))?;
+        charge_amount =
+            calculate_prorated_first_charge(charge_amount, sub.interval_seconds, elapsed_seconds)
+                .map_err(|e| charge_fail(env, subscription_id, e, charge_amount, now))?;
     }
 
     if let Some(cap) = sub.lifetime_cap {
@@ -458,7 +484,11 @@ pub fn charge_one(
     };
 
     let salt_key = DataKey::ChargeSalt(subscription_id);
-    if let Some(last_salt) = env.storage().instance().get::<_, soroban_sdk::BytesN<32>>(&salt_key) {
+    if let Some(last_salt) = env
+        .storage()
+        .instance()
+        .get::<_, soroban_sdk::BytesN<32>>(&salt_key)
+    {
         if last_salt == salt {
             return Err(charge_fail(
                 env,
@@ -598,11 +628,23 @@ pub fn charge_one(
 
             // Route merchant amount to sub-account if subscription has one
             if let Some(ref label) = sub.sub_account_label {
-                crate::merchant::credit_sub_account(env, &sub.merchant, label, &sub.token, merchant_amount)?;
+                crate::merchant::credit_sub_account(
+                    env,
+                    &sub.merchant,
+                    label,
+                    &sub.token,
+                    merchant_amount,
+                )?;
                 // Deduct from parent balance (parent earnings stay for roll-up reporting)
-                let parent_bal = crate::merchant::get_merchant_balance_by_token(env, &sub.merchant, &sub.token);
+                let parent_bal =
+                    crate::merchant::get_merchant_balance_by_token(env, &sub.merchant, &sub.token);
                 let new_parent_bal = crate::safe_math::safe_sub(parent_bal, merchant_amount)?;
-                crate::merchant::set_merchant_balance(env, &sub.merchant, &sub.token, &new_parent_bal);
+                crate::merchant::set_merchant_balance(
+                    env,
+                    &sub.merchant,
+                    &sub.token,
+                    &new_parent_bal,
+                );
             }
 
             let conversion = if fee_amount > 0 {
@@ -872,8 +914,7 @@ pub fn charge_one(
 
                 if failures >= threshold {
                     // Re-load subscription to apply the Paused transition cleanly.
-                    let mut sub2 =
-                        crate::queries::get_subscription(env, subscription_id).unwrap();
+                    let mut sub2 = crate::queries::get_subscription(env, subscription_id).unwrap();
                     if sub2.status == SubscriptionStatus::InsufficientBalance {
                         if transition_to(&mut sub2.status, SubscriptionStatus::Paused).is_ok() {
                             crate::subscription::write_subscription(env, subscription_id, &sub2);
@@ -1249,15 +1290,33 @@ pub fn charge_usage_one(
 
             // Route merchant amount to sub-account if subscription has one
             if let Some(ref label) = sub.sub_account_label {
-                crate::merchant::credit_sub_account(env, &sub.merchant, label, &sub.token, merchant_amount)?;
+                crate::merchant::credit_sub_account(
+                    env,
+                    &sub.merchant,
+                    label,
+                    &sub.token,
+                    merchant_amount,
+                )?;
                 // Deduct from parent balance (parent earnings stay for roll-up reporting)
-                let parent_bal = crate::merchant::get_merchant_balance_by_token(env, &sub.merchant, &sub.token);
+                let parent_bal =
+                    crate::merchant::get_merchant_balance_by_token(env, &sub.merchant, &sub.token);
                 let new_parent_bal = crate::safe_math::safe_sub(parent_bal, merchant_amount)?;
-                crate::merchant::set_merchant_balance(env, &sub.merchant, &sub.token, &new_parent_bal);
+                crate::merchant::set_merchant_balance(
+                    env,
+                    &sub.merchant,
+                    &sub.token,
+                    &new_parent_bal,
+                );
             }
 
             let conversion = if fee_amount > 0 {
-                Some(convert_fee(env, &sub.merchant, &sub.token, fee_amount, None))
+                Some(convert_fee(
+                    env,
+                    &sub.merchant,
+                    &sub.token,
+                    fee_amount,
+                    None,
+                ))
             } else {
                 None
             };
@@ -1450,12 +1509,13 @@ pub(crate) fn credit_charge_payees(
     if let Some(split_payees) = crate::subscription::get_split_payees(env, subscription_id) {
         let mut total_distributed_amount = 0i128;
         let num_payees = split_payees.entries.len();
-        
+
         for i in 1..num_payees {
             if let Some(entry) = split_payees.entries.get(i) {
                 let (payee, weight) = entry;
                 let share = net_merchant_amount * weight as i128 / 10_000i128;
-                total_distributed_amount = crate::safe_math::safe_add(total_distributed_amount, share)?;
+                total_distributed_amount =
+                    crate::safe_math::safe_add(total_distributed_amount, share)?;
                 crate::merchant::credit_merchant_balance_for_token(
                     env,
                     &payee,
@@ -1465,7 +1525,7 @@ pub(crate) fn credit_charge_payees(
                 )?;
             }
         }
-        
+
         if let Some(entry) = split_payees.entries.get(0) {
             let (payee, _) = entry;
             let first_share = net_merchant_amount - total_distributed_amount;
@@ -1477,7 +1537,7 @@ pub(crate) fn credit_charge_payees(
                 charge_kind,
             )?;
         }
-        
+
         let mut payees_vec = soroban_sdk::Vec::new(env);
         for i in 0..num_payees {
             if let Some(entry) = split_payees.entries.get(i) {
@@ -1490,9 +1550,12 @@ pub(crate) fn credit_charge_payees(
                 payees_vec.push_back((payee, share));
             }
         }
-        
+
         env.events().publish(
-            (soroban_sdk::Symbol::new(env, "split_charge"), subscription_id),
+            (
+                soroban_sdk::Symbol::new(env, "split_charge"),
+                subscription_id,
+            ),
             crate::types::SplitChargeEvent {
                 subscription_id,
                 payees: payees_vec,
@@ -1542,22 +1605,22 @@ pub fn calculate_prorated_first_charge(
     if amount < 0 {
         return Err(Error::InvalidAmount);
     }
-    
+
     if interval == 0 {
         return Err(Error::InvalidInput);
     }
-    
+
     // Handle edge case: if remaining_seconds is 0, no charge
     if remaining_seconds == 0 {
         return Ok(0);
     }
-    
+
     // Cap remaining_seconds to interval to avoid overflow
     // If remaining >= interval, we charge the full amount
     if remaining_seconds >= interval {
         return Ok(amount);
     }
-    
+
     // Split amount into quotient and remainder so neither intermediate product
     // scales with the full i128 amount:
     // (amount * remaining) / interval

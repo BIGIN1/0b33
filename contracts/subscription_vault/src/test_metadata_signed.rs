@@ -89,7 +89,7 @@ fn create_subscription(
         &false,
         &None::<i128>,
         &None::<u64>,
-    &None::<u32>,
+        &None::<u32>,
     );
     let _ = token; // touch unused param to silence the lint without complaining
     (id, subscriber, merchant)
@@ -222,7 +222,7 @@ fn subscriber_signed_set_succeeds() {
         &false,
         &None::<i128>,
         &None::<u64>,
-    &None::<u32>,
+        &None::<u32>,
     );
 
     let payload = payload_for(
@@ -266,7 +266,7 @@ fn merchant_signed_set_succeeds() {
         &false,
         &None::<i128>,
         &None::<u64>,
-    &None::<u32>,
+        &None::<u32>,
     );
 
     let payload = payload_for(
@@ -302,8 +302,8 @@ fn sequential_nonces_advance() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let signer = pubkey_to_address(&env, &bytes32(&env, &sub_key.pub_bytes));
 
@@ -347,8 +347,8 @@ fn replayed_nonce_is_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
 
     let payload = payload_for(&env, sub_id, "k", "v", 0u64, one_hour_from_now(&env));
@@ -378,8 +378,8 @@ fn skipped_nonce_is_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
 
     // Submit nonce 0 first to advance the counter to 1.
@@ -409,8 +409,8 @@ fn expires_at_equal_to_now_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let now = env.ledger().timestamp();
     let payload = payload_for(&env, sub_id, "k", "v", 0u64, now);
@@ -436,8 +436,8 @@ fn expires_at_in_past_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let now = env.ledger().timestamp();
     let payload = payload_for(&env, sub_id, "k", "v", 0u64, now.saturating_sub(1));
@@ -466,8 +466,8 @@ fn expires_at_in_future_succeeds() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let payload = payload_for(
         &env,
@@ -501,8 +501,8 @@ fn forged_signature_panics() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let payload = payload_for(&env, sub_id, "k", "v", 0u64, one_hour_from_now(&env));
     let (_good_sig, _) = sign_payload(&env, &sub_key, &payload);
@@ -537,8 +537,8 @@ fn wrong_key_signature_panics() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     // Attacker builds a fully valid signature on the right message bytes
     // using THEIR key, then submits claiming to be the subscriber.
@@ -574,8 +574,8 @@ fn chain_id_mismatch_panics() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let payload = payload_for(&env, sub_id, "k", "v", 0u64, one_hour_from_now(&env));
     // Sign for galaxy-A but the contract's chain_id reads as whatever
@@ -650,8 +650,8 @@ fn key_too_long_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
 
     // 33-byte key — one over the 32-byte limit. Use ascii letters so
@@ -688,8 +688,8 @@ fn value_too_long_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let long_value = String::from_str(&env, &"a".repeat(257));
     let payload = SignedMetadataPayload {
@@ -722,8 +722,8 @@ fn empty_key_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let payload = SignedMetadataPayload {
         subscription_id: sub_id,
@@ -754,8 +754,8 @@ fn empty_value_rejected() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let payload = SignedMetadataPayload {
         subscription_id: sub_id,
@@ -786,8 +786,8 @@ fn key_cap_reached() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
 
     // Fill the 10-key cap on signed path.
@@ -862,8 +862,8 @@ fn subscriber_and_merchant_nonces_independent() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
 
     // Subscriber does one update.
@@ -909,8 +909,8 @@ fn nonce_overflow_is_guarded() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let signer = Address::generate(&env);
     env.as_contract(&client.address, || {
@@ -921,7 +921,10 @@ fn nonce_overflow_is_guarded() {
         crate::nonce::check_and_advance(&env, &signer, crate::nonce::DOMAIN_METADATA_SIGNED, 1)
             .expect("second consume ok");
         env.storage().persistent().set(
-            &crate::DataKey::AdminNonce(signer.clone(), crate::nonce::DOMAIN_METADATA_SIGNED.as_u32()),
+            &crate::DataKey::AdminNonce(
+                signer.clone(),
+                crate::nonce::DOMAIN_METADATA_SIGNED.as_u32(),
+            ),
             &u64::MAX,
         );
         let res = crate::nonce::check_and_advance(
@@ -971,8 +974,8 @@ fn success_emits_signed_event() {
             &false,
             &None::<i128>,
             &None::<u64>,
-                &None::<u32>,
-)
+            &None::<u32>,
+        )
     };
     let payload = payload_for(&env, sub_id, "k", "v", 0u64, one_hour_from_now(&env));
     let (signature, _) = sign_payload(&env, &sub_key, &payload);
@@ -1067,12 +1070,7 @@ fn key_at_max_length_accepted() {
     let (sub_id, subscriber, _merchant) = create_subscription(&env, &client, &client.address);
 
     let key = String::from_str(&env, &"a".repeat(crate::MAX_METADATA_KEY_LENGTH as usize));
-    client.set_metadata(
-        &sub_id,
-        &subscriber,
-        &key,
-        &String::from_str(&env, "v"),
-    );
+    client.set_metadata(&sub_id, &subscriber, &key, &String::from_str(&env, "v"));
 
     assert_eq!(
         client.get_metadata(&sub_id, &key),
@@ -1087,14 +1085,12 @@ fn value_at_max_length_accepted() {
     let (sub_id, subscriber, _merchant) = create_subscription(&env, &client, &client.address);
 
     let val = String::from_str(&env, &"v".repeat(crate::MAX_METADATA_VALUE_LENGTH as usize));
-    client.set_metadata(
-        &sub_id,
-        &subscriber,
-        &String::from_str(&env, "k"),
-        &val,
-    );
+    client.set_metadata(&sub_id, &subscriber, &String::from_str(&env, "k"), &val);
 
-    assert_eq!(client.get_metadata(&sub_id, &String::from_str(&env, "k")), val);
+    assert_eq!(
+        client.get_metadata(&sub_id, &String::from_str(&env, "k")),
+        val
+    );
 }
 
 // ── Cross-subscription replay protection ─────────────────────────────────────
@@ -1151,7 +1147,10 @@ fn cross_subscription_replay_rejected() {
     );
 
     // Sanity: the two subscriptions must be distinct.
-    assert_ne!(sub_id_a, sub_id_b, "test requires two different subscription IDs");
+    assert_ne!(
+        sub_id_a, sub_id_b,
+        "test requires two different subscription IDs"
+    );
 
     // Step 1 — produce a legitimately signed payload for subscription A.
     let payload_a = payload_for(
@@ -1186,7 +1185,9 @@ fn cross_subscription_replay_rejected() {
         let contract_id = env2.register(SubscriptionVault, ());
         let c = SubscriptionVaultClient::new(&env2, &contract_id);
         let admin2 = Address::generate(&env2);
-        let tok2 = env2.register_stellar_asset_contract_v2(admin2.clone()).address();
+        let tok2 = env2
+            .register_stellar_asset_contract_v2(admin2.clone())
+            .address();
         c.init(&tok2, &6u32, &admin2, &min_topup(), &grace_period());
         (env2.clone(), c, tok2.clone(), admin2)
     };
@@ -1230,10 +1231,10 @@ fn cross_subscription_replay_rejected() {
     // the signature that was computed over A's message bytes.
     let replay_payload = payload_for(
         &env2,
-        sub_id_b2,          // ← subscription B
+        sub_id_b2, // ← subscription B
         "invoice_id",
-        "INV-A-001",        // ← same key/value as sub A
-        0u64,               // ← same nonce
+        "INV-A-001", // ← same key/value as sub A
+        0u64,        // ← same nonce
         env2.ledger().timestamp() + 3600,
     );
 
@@ -1244,5 +1245,73 @@ fn cross_subscription_replay_rejected() {
         &bytes32(&env2, &sub_key.pub_bytes),
         &replay_payload,
         &sig_a2,
+    );
+}
+
+/// Reaching the limit, then updating an existing key must not consume a new
+/// slot. This test explicitly verifies:
+///
+/// 1. Filling to exactly `MAX_METADATA_KEYS` succeeds.
+/// 2. Adding one more *new* key is rejected (`MetadataKeyLimitReached`).
+/// 3. Updating an *existing* key at the limit succeeds.
+/// 4. The key count remains exactly `MAX_METADATA_KEYS` — no new slot consumed.
+/// 5. The updated value is stored correctly.
+/// 6. All other keys and values remain intact.
+/// 7. A second update to a *different* existing key also succeeds at the limit.
+#[test]
+fn update_existing_key_at_limit_does_not_consume_new_slot() {
+    let (env, client, _token, _admin) = setup();
+    let (sub_id, subscriber, _merchant) = create_subscription(&env, &client, &client.address);
+
+    // 1. Fill to exactly MAX_METADATA_KEYS.
+    for n in 0..crate::MAX_METADATA_KEYS {
+        let key = String::from_str(&env, &format!("key{}", n));
+        let val = String::from_str(&env, &format!("val{}", n));
+        client.set_metadata(&sub_id, &subscriber, &key, &val);
+    }
+    assert_eq!(
+        client.list_metadata_keys(&sub_id).len(),
+        crate::MAX_METADATA_KEYS
+    );
+
+    // 2. One more new key must be rejected.
+    let overflow_key = String::from_str(&env, "overflow");
+    let res = client.try_set_metadata(
+        &sub_id,
+        &subscriber,
+        &overflow_key,
+        &String::from_str(&env, "x"),
+    );
+    assert_eq!(res, Err(Ok(crate::Error::MetadataKeyLimitReached)));
+
+    // 3. Update an existing key at the limit — must succeed.
+    let key0 = String::from_str(&env, "key0");
+    let new_val = String::from_str(&env, "updated_val");
+    client.set_metadata(&sub_id, &subscriber, &key0, &new_val);
+
+    // 4. Key count must still be MAX_METADATA_KEYS (no new slot consumed).
+    let keys = client.list_metadata_keys(&sub_id);
+    assert_eq!(keys.len(), crate::MAX_METADATA_KEYS);
+    assert!(!keys.iter().any(|k| k == overflow_key));
+
+    // 5. The updated value must be stored.
+    assert_eq!(client.get_metadata(&sub_id, &key0), new_val);
+
+    // 6. All other keys and values must remain intact.
+    for n in 1..crate::MAX_METADATA_KEYS {
+        let key = String::from_str(&env, &format!("key{}", n));
+        let expected = String::from_str(&env, &format!("val{}", n));
+        assert_eq!(client.get_metadata(&sub_id, &key), expected);
+    }
+
+    // 7. Update a different existing key — also succeeds at the limit.
+    let key5 = String::from_str(&env, "key5");
+    let new_val5 = String::from_str(&env, "also_updated");
+    client.set_metadata(&sub_id, &subscriber, &key5, &new_val5);
+
+    assert_eq!(client.get_metadata(&sub_id, &key5), new_val5);
+    assert_eq!(
+        client.list_metadata_keys(&sub_id).len(),
+        crate::MAX_METADATA_KEYS
     );
 }
