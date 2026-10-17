@@ -124,6 +124,9 @@ pub fn do_submit_proposal(
     if quorum_bps > 10_000 {
         return Err(Error::InvalidInput);
     }
+    if kind == ProposalKind::SetDisputeWindow && target3 == 0 {
+        return Err(Error::InvalidInput);
+    }
 
     let now = env.ledger().timestamp();
     let min_eta = now.checked_add(MIN_TIMELOCK_DELAY).ok_or(Error::Overflow)?;
@@ -361,6 +364,9 @@ pub fn do_execute_proposal(env: &Env, proposal_id: u64) -> Result<(), Error> {
         }
         ProposalKind::RemoveAcceptedToken => {
             // Token removal is handled by the caller
+        }
+        ProposalKind::SetDisputeWindow => {
+            crate::admin::apply_dispute_window_secs(env, u64::from(proposal.target3))?;
         }
     }
 

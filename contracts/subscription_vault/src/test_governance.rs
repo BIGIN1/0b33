@@ -96,3 +96,33 @@ fn direct_admin_rotation_invalidates_outstanding_proposals() {
 		Err(Ok(Error::ProposalInvalidated))
 	);
 }
+
+#[test]
+fn dispute_window_can_be_changed_by_governance_proposal() {
+	let env = Env::default();
+	env.mock_all_auths();
+	let contract_id = env.register(SubscriptionVault, ());
+	let client = SubscriptionVaultClient::new(&env, &contract_id);
+	let admin = Address::generate(&env);
+	let token = env
+		.register_stellar_asset_contract_v2(admin.clone())
+		.address();
+	client.init(&token, &6, &admin, &1_000_000i128, &(7 * 24 * 60 * 60));
+	client.add_guardian(&admin, &admin, &1u32);
+
+	let eta = env.ledger().timestamp() + 2 * 24 * 60 * 60;
+	let proposal_id = client.submit_proposal(
+		&ProposalKind::SetDisputeWindow,
+		&admin,
+		&None::<Address>,
+		&3_600u32,
+		&6_700u32,
+		&eta,
+	);
+	client.vote_proposal(&proposal_id, &true, &0u64);
+
+	env.ledger().set_timestamp(eta);
+	client.execute_proposal(&proposal_id);
+
+	assert_eq!(client.get_dispute_window_secs(), 3_600);
+}
