@@ -151,16 +151,22 @@ mod abi_hash_regression {
             actual, GOLDEN_ABI_HASH,
             "\n\
             ABI entry-point hash changed!\n\
-            Expected : {}\n\
-            Got      : {}\n\
+            \n\
+            Old (expected) : {old}\n\
+            New (got)      : {new}\n\
+            \n\
+            To update the golden value, replace GOLDEN_ABI_HASH with:\n\
+            \n\
+                \"{new}\"\n\
             \n\
             This means a `pub fn` was added, removed, or renamed in the\n\
             `#[contractimpl]` block of lib.rs.  If this is intentional:\n\
-            1. Update GOLDEN_ABI_HASH in tests/abi_hash_regression.rs.\n\
+            1. Paste the new hash above into GOLDEN_ABI_HASH in\n\
+               tests/abi_hash_regression.rs.\n\
             2. Add a comment explaining what changed and why.\n\
             3. Confirm existing clients / SDKs are updated.\n",
-            GOLDEN_ABI_HASH,
-            actual,
+            old = GOLDEN_ABI_HASH,
+            new = actual,
         );
     }
 
